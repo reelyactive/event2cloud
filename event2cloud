@@ -1,0 +1,148 @@
+#!/usr/bin/env node
+/*
+ * Copyright reelyActive 2015
+ * We believe in an open Internet of Things
+ */
+
+
+var minimist = require('minimist');
+var argv = minimist(process.argv.slice(2));
+
+function usage() {
+  console.log('-h <hostname>                  # the hostname of barnacles instance. Defaults to: localhost.');
+  console.log('-p <port>                      # the port of barnacles instance. Defaults to: 3011.');
+  console.log('-m <minimum rssi>              # defines the minimum RSSI to be considered before sending. Useful to limit how close the devices should be to be detected.');
+  console.log('-i <ignore map>                # a JSON-like map that defines device ids that should be ignored. Example: { "001de30940800001" : true } ignores a device identified by 001de30940800001.');
+  console.log('-u <run ntpdate every minute>  # runs ntpdate command every minute. You need sudo rights to use it.');
+}
+
+if (argv.help)  {
+  usage();
+  process.exit(0);
+}
+
+var hostname = argv.h || 'localhost';
+var port = argv.p || 3011;
+var minimumRSSI = argv.m || null;
+var updateDate = argv.u || false;
+var ignore = !!argv.i && JSON.parse(argv.i) || {};
+
+
+var barnowl = require('barnowl');
+var middleware = new barnowl();
+var fs = require('fs');
+var request = require('request');
+
+
+if (updateDate) {
+  setInterval(function() {
+    var exec = require('child_process').exec;
+
+    function puts(error, stdout, stderr) {
+      console.log(stdout);
+      console.error(stderr);
+    }
+
+    exec("sudo ntpdate -u ntp.ubuntu.com", puts);
+  }, 60000);
+}
+
+function go() {
+
+
+  function postUpdate(options, event, tiraid) {
+    var hostname = options.hostname;
+    var port = options.port;
+
+    var deviceId = tiraid.identifier.value;
+    var rssi = tiraid.radioDecodings[0].rssi;
+
+    if (minimumRSSI && rssi < minimumRSSI) {
+      return;
+    }
+
+    if (ignore[deviceId]) {
+      return;
+    }
+
+    var notification = {
+      "event": event,
+      "tiraid": tiraid
+    };
+
+    var uri = 'http://' + hostname + ':' + port + '/events';
+
+    request.post(
+      {
+        uri: uri,
+        json: notification,
+        timeout: 3000
+      },
+      function(err, res, body) {
+        if (err) {
+          cleanView(tiraid, [hostname, err.message].join(" "));
+        } else {
+          if (res) {
+            if (body) {
+
+              if (typeof body === 'string') {
+                try {
+                  body = JSON.parse(body);
+                } catch (e) {
+                  console.log(body)
+                  body = { message: body };
+                }
+              }
+            }
+            cleanView(tiraid,
+              ["st:", res.statusCode, hostname, "::", body.message].join(" "));
+          } else {
+            cleanView(tiraid, ["st: no response", hostname].join(" "));
+          }
+        }
+
+      });
+
+  }
+
+  function cleanView(tiraid, other) {
+    var oldTimestamp = new Date(tiraid.timestamp).getTime();
+    var n = new Date();
+    var timestamp = n.getTime();
+    var timeDifference = '+' + ('000' + (timestamp - oldTimestamp)).substr(-3) + 'ms';
+    var output = tiraid.identifier && tiraid.identifier.value + ' ' || 'no detectedBy id';
+    var decodings = tiraid.radioDecodings;
+    for (var cDecoder = 0; cDecoder < decodings.length; cDecoder++) {
+      var id = decodings[cDecoder].identifier;
+      if (id === null || id.value === null) {
+        id = 'xx';
+      }
+      else {
+        id = id.value.substr(-2);
+      }
+      output += ' ' + id + ': ' + decodings[cDecoder].rssi;
+    }
+    console.log(n.toISOString(), timeDifference, output, other ? other : "");
+  }
+
+  middleware.on('visibilityEvent', function(data) {
+    var localOptions = {
+      hostname: hostname,
+      port: port
+    };
+    postUpdate(localOptions, "appearance", data);
+  });
+
+}
+
+process.on('uncaughtException', function(err) {
+  middleware.bind({ protocol: 'udp', path: '0.0.0.0:50000' });
+  console.log("Warning: Can not read reelceiver from serial port: ", err.message);
+  console.log("Please make sure serialport npm package is installed and the reelceiver is connected to a USB port.");
+});
+
+middleware.bind({ protocol: 'serial', path: 'auto' });
+
+go();
+
+

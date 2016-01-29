@@ -1,0 +1,20 @@
+{
+  "name": "event2cloud",
+  "version": "0.1.0",
+  "description": "Sends events to reelyActive's cloud platform or barnacles.",
+  "main": "event2cloud",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reelyactive/event2cloud.git"
+  },
+  "author": "Juan Pinazo <juan@reelyactive.com>",
+  "license": "MIT",
+  "dependencies": {
+    "barnowl": "^0.4.14",
+    "request": "^2.67.0",
+    "serialport": "^2.0.6"
+  }
+}
